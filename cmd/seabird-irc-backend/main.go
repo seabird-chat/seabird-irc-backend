@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/mattn/go-isatty"
@@ -39,18 +40,24 @@ func main() {
 		logger = zerolog.New(os.Stdout)
 	}
 
+	logger = logger.With().Timestamp().Logger()
+	logger.Level(zerolog.InfoLevel)
+
 	nick := Env(logger, "IRC_NICK")
 	user := EnvDefault("IRC_USER", nick)
 	name := EnvDefault("IRC_NAME", user)
 
 	config := seabird_irc.IRCConfig{
-		Logger:      logger,
-		IRCHost:     Env(logger, "IRC_HOST"),
-		Nick:        nick,
-		User:        user,
-		Name:        name,
-		SeabirdHost: Env(logger, "SEABIRD_HOST"),
-		Token:       Env(logger, "SEABIRD_TOKEN"),
+		IRCID:         EnvDefault("IRC_ID", "seabird"),
+		CommandPrefix: EnvDefault("IRC_COMMAND_PREFIX", "!"),
+		Logger:        logger,
+		IRCHost:       Env(logger, "IRC_HOST"),
+		Nick:          nick,
+		User:          user,
+		Name:          name,
+		Channels:      strings.Split(EnvDefault("IRC_CHANNELS", ""), ","),
+		SeabirdHost:   Env(logger, "SEABIRD_HOST"),
+		Token:         Env(logger, "SEABIRD_TOKEN"),
 	}
 
 	backend, err := seabird_irc.New(config)

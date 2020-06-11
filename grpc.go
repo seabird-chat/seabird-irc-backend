@@ -23,14 +23,19 @@ func newGRPCClient(host, token string) (pb.ChatIngestClient, error) {
 	}
 
 	var insecure bool
-	var port int
+
+	port := url.Port()
 
 	switch url.Scheme {
 	case "http":
 		insecure = true
-		port = 80
-	case "https", "":
-		port = 443
+		if port == "" {
+			port = "80"
+		}
+	case "https":
+		if port == "" {
+			port = "443"
+		}
 	default:
 		return nil, errors.New("unknown grpc scheme")
 	}
@@ -47,7 +52,7 @@ func newGRPCClient(host, token string) (pb.ChatIngestClient, error) {
 		opt = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(certPool, ""))
 	}
 
-	conn, err := grpc.DialContext(newCtx, fmt.Sprintf("%s:%d", url.Host, port),
+	conn, err := grpc.DialContext(newCtx, fmt.Sprintf("%s:%s", url.Hostname(), port),
 		opt,
 		grpc.WithPerRPCCredentials(grpcTokenAuth{
 			Token:    token,
