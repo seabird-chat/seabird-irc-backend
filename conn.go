@@ -2,7 +2,9 @@ package seabird_irc
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/go-irc/irc/v4"
 	"github.com/go-irc/ircx"
@@ -64,8 +66,8 @@ func New(config IRCConfig) (*Backend, error) {
 	return b, nil
 }
 
-func (b *Backend) ircHandler(c *ircx.Client, m *irc.Message) {
-	switch m.Command {
+func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
+	switch msg.Command {
 	case "001":
 		for _, channel := range b.channels {
 			_ = b.writeIRCMessage(&irc.Message{
@@ -74,32 +76,93 @@ func (b *Backend) ircHandler(c *ircx.Client, m *irc.Message) {
 			}, nil)
 		}
 	case "PRIVMSG":
+		lastArg := msg.Trailing()
+		currentNick := b.irc.CurrentNick()
+
+		if msg.Params[0] == currentNick {
+			sender := msg.Prefix.Name
+			message := lastArg
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateMessage{PrivateMessage: &pb.PrivateMessageEvent{
+				Source: &pb.User{
+					Id:          sender,
+					DisplayName: sender,
+				},
+				Text: message,
+			}}})
+		} else {
+			channel := msg.Params[0]
+			sender := msg.Prefix.Name
+
+			source := &pb.ChannelSource{
+				ChannelId: channel,
+				User: &pb.User{
+					Id:          sender,
+					DisplayName: sender,
+				},
+			}
+
+			if strings.HasPrefix(lastArg, b.cmdPrefix) {
+				msgParts := strings.SplitN(lastArg, " ", 2)
+				if len(msgParts) < 2 {
+					msgParts = append(msgParts, "")
+				}
+
+				command := strings.TrimPrefix(msgParts[0], b.cmdPrefix)
+				arg := msgParts[1]
+
+				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Command{Command: &pb.CommandEvent{
+					Source:  source,
+					Command: command,
+					Arg:     arg,
+				}}})
+			} else if len(lastArg) >= len(currentNick)+1 &&
+				strings.HasPrefix(lastArg, currentNick) &&
+				unicode.IsPunct(rune(lastArg[len(currentNick)])) &&
+				lastArg[len(currentNick)+1] == ' ' {
+
+				message := strings.TrimSpace(lastArg[len(currentNick)+1:])
+
+				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Mention{Mention: &pb.MentionEvent{
+					Source: source,
+					Text:   message,
+				}}})
+			} else {
+				message := lastArg
+
+				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Message{Message: &pb.MessageEvent{
+					Source: source,
+					Text:   message,
+				}}})
+			}
+		}
+
 	case "JOIN":
-		if m.Prefix.Name == b.irc.CurrentNick() {
+		if msg.Prefix.Name == b.irc.CurrentNick() {
 			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_JoinChannel{JoinChannel: &pb.JoinChannelChatEvent{
-				ChannelId:   m.Params[0],
-				DisplayName: m.Params[0],
+				ChannelId:   msg.Params[0],
+				DisplayName: msg.Params[0],
 			}}})
 		}
 	case "PART":
-		if m.Prefix.Name == b.irc.CurrentNick() {
+		if msg.Prefix.Name == b.irc.CurrentNick() {
 			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_LeaveChannel{LeaveChannel: &pb.LeaveChannelChatEvent{
-				ChannelId: m.Params[0],
+				ChannelId: msg.Params[0],
 			}}})
 		}
 	case "KICK":
-		if m.Params[1] == b.irc.CurrentNick() {
+		if msg.Params[1] == b.irc.CurrentNick() {
 			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_LeaveChannel{LeaveChannel: &pb.LeaveChannelChatEvent{
-				ChannelId: m.Params[0],
+				ChannelId: msg.Params[0],
 			}}})
 		}
 	case "PONG":
-		b.handlePong(m.Trailing())
+		b.handlePong(msg.Trailing())
 	case irc.RPL_TOPIC:
 		b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_ChangeChannel{ChangeChannel: &pb.ChangeChannelChatEvent{
-			ChannelId:   m.Params[1],
-			DisplayName: m.Params[1],
-			Topic:       m.Trailing(),
+			ChannelId:   msg.Params[1],
+			DisplayName: msg.Params[1],
+			Topic:       msg.Trailing(),
 		}}})
 	default:
 	}
@@ -227,7 +290,7 @@ func (b *Backend) Run() error {
 		return err
 	}
 
-	b.ingestStream.Send(&pb.ChatEvent{
+	err = b.ingestStream.Send(&pb.ChatEvent{
 		Inner: &pb.ChatEvent_Hello{
 			Hello: &pb.HelloChatEvent{
 				BackendInfo: &pb.Backend{
@@ -237,6 +300,9 @@ func (b *Backend) Run() error {
 			},
 		},
 	})
+	if err != nil {
+		return err
+	}
 
 	errGroup.Go(func() error { return b.handleIngest(ctx) })
 	errGroup.Go(func() error { return b.irc.RunContext(ctx) })

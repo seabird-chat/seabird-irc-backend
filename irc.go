@@ -77,6 +77,10 @@ func (b *Backend) writeIRCMessage(m *irc.Message, msg *pb.ChatRequest) error {
 	}
 
 	if msg != nil && msg.Id != "" {
+		b.requestsLock.Lock()
+		b.requests[msg.Id] = msg
+		b.requestsLock.Unlock()
+
 		err = b.irc.WriteMessage(&irc.Message{
 			Command: "PING",
 			Params:  []string{msg.Id},
