@@ -6,20 +6,20 @@ RUN go get google.golang.org/protobuf/cmd/protoc-gen-go
 RUN go get go get google.golang.org/grpc/cmd/protoc-gen-go-grpc
 
 RUN mkdir /build
-RUN mkdir -p /seabird-core/{go,proto}
+RUN mkdir -p /seabird-irc-backend/{go,proto}
 
-WORKDIR /seabird-core
+WORKDIR /seabird-irc-backend
 
 ADD ./go.mod ./go.sum ./
 RUN go mod download
 
-ADD ./proto/* /seabird-core/proto/
+ADD ./proto/* /seabird-irc-backend/proto/
 
 ADD ./pb/* ./pb/
 RUN go generate ./...
 
 ADD . ./
-RUN go build -v -o /build/seabird-core ./cmd/seabird-core
+RUN go build -v -o /build/seabird-irc-backend ./cmd/seabird-irc-backend
 
 # Stage 2: Copy files and configure what we need
 FROM debian:buster-slim
@@ -31,4 +31,4 @@ COPY --from=builder /build /bin
 
 EXPOSE 11235
 
-ENTRYPOINT ["/bin/seabird-core"]
+ENTRYPOINT ["/bin/seabird-irc-backend"]
