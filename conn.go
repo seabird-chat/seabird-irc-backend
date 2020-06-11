@@ -48,9 +48,11 @@ func New(config IRCConfig) (*Backend, error) {
 	var err error
 
 	b := &Backend{
+		id:        config.IRCID,
 		channels:  config.Channels,
 		logger:    config.Logger,
 		cmdPrefix: config.CommandPrefix,
+		requests:  make(map[string]*pb.ChatRequest),
 	}
 
 	b.grpc, err = newGRPCClient(config.SeabirdHost, config.Token)
