@@ -61,9 +61,9 @@ func newIRCClient(config *IRCConfig, handler ircx.Handler) (*ircx.Client, error)
 		EnableTracker: true,
 		PingFrequency: 60 * time.Second,
 		PingTimeout:   10 * time.Second,
-		SendLimit:     1 * time.Second,
-		SendBurst:     4,
-		Handler:       handler,
+		//SendLimit:     1 * time.Second,
+		//SendBurst:     4,
+		Handler: handler,
 	}), nil
 }
 
