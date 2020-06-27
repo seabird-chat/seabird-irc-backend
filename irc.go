@@ -6,12 +6,37 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/go-irc/irc/v4"
 	"github.com/go-irc/ircx"
 	"github.com/seabird-chat/seabird-irc-backend/pb"
 )
+
+type CTCPMessage struct {
+	Action string
+	Text   string
+}
+
+func parseCtcp(msg *irc.Message) (*CTCPMessage, bool) {
+	lastArg := msg.Trailing()
+
+	if !(strings.HasPrefix(lastArg, "\x01") && strings.HasSuffix(lastArg, "\x01")) {
+		return nil, false
+	}
+
+	split := strings.SplitN(strings.TrimPrefix(strings.TrimSuffix(lastArg, "\x01"), "\x01"), " ", 2)
+	ret := &CTCPMessage{
+		Action: split[0],
+	}
+
+	if len(split) == 2 {
+		ret.Text = split[1]
+	}
+
+	return ret, true
+}
 
 func newIRCClient(config *IRCConfig, handler ircx.Handler) (*ircx.Client, error) {
 	ircUrl, err := url.Parse(config.IRCHost)

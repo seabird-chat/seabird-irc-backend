@@ -2,6 +2,7 @@ package seabird_irc
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"unicode"
@@ -78,67 +79,7 @@ func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
 			}, nil)
 		}
 	case "PRIVMSG":
-		lastArg := msg.Trailing()
-		currentNick := b.irc.CurrentNick()
-
-		if msg.Params[0] == currentNick {
-			sender := msg.Prefix.Name
-			message := lastArg
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateMessage{PrivateMessage: &pb.PrivateMessageEvent{
-				Source: &pb.User{
-					Id:          sender,
-					DisplayName: sender,
-				},
-				Text: message,
-			}}})
-		} else {
-			channel := msg.Params[0]
-			sender := msg.Prefix.Name
-
-			source := &pb.ChannelSource{
-				ChannelId: channel,
-				User: &pb.User{
-					Id:          sender,
-					DisplayName: sender,
-				},
-			}
-
-			if strings.HasPrefix(lastArg, b.cmdPrefix) {
-				msgParts := strings.SplitN(lastArg, " ", 2)
-				if len(msgParts) < 2 {
-					msgParts = append(msgParts, "")
-				}
-
-				command := strings.TrimPrefix(msgParts[0], b.cmdPrefix)
-				arg := msgParts[1]
-
-				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Command{Command: &pb.CommandEvent{
-					Source:  source,
-					Command: command,
-					Arg:     arg,
-				}}})
-			} else if len(lastArg) >= len(currentNick)+1 &&
-				strings.HasPrefix(lastArg, currentNick) &&
-				unicode.IsPunct(rune(lastArg[len(currentNick)])) &&
-				lastArg[len(currentNick)+1] == ' ' {
-
-				message := strings.TrimSpace(lastArg[len(currentNick)+1:])
-
-				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Mention{Mention: &pb.MentionEvent{
-					Source: source,
-					Text:   message,
-				}}})
-			} else {
-				message := lastArg
-
-				b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Message{Message: &pb.MessageEvent{
-					Source: source,
-					Text:   message,
-				}}})
-			}
-		}
-
+		b.handlePrivmsg(msg)
 	case "JOIN":
 		if msg.Prefix.Name == b.irc.CurrentNick() {
 			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_JoinChannel{JoinChannel: &pb.JoinChannelChatEvent{
@@ -227,6 +168,94 @@ func (b *Backend) handlePong(id string) {
 	}
 }
 
+func (b *Backend) handlePrivmsg(msg *irc.Message) {
+	lastArg := msg.Trailing()
+	currentNick := b.irc.CurrentNick()
+
+	if msg.Params[0] == currentNick {
+		sender := msg.Prefix.Name
+		message := lastArg
+
+		if ctcp, ok := parseCtcp(msg); ok {
+			// Ignore everything but ACTION CTCP events
+			if ctcp.Action != "ACTION" {
+				return
+			}
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateAction{PrivateAction: &pb.PrivateActionEvent{
+				Source: &pb.User{
+					Id:          sender,
+					DisplayName: sender,
+				},
+				Text: ctcp.Text,
+			}}})
+		} else {
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateMessage{PrivateMessage: &pb.PrivateMessageEvent{
+				Source: &pb.User{
+					Id:          sender,
+					DisplayName: sender,
+				},
+				Text: message,
+			}}})
+		}
+	} else {
+		channel := msg.Params[0]
+		sender := msg.Prefix.Name
+
+		source := &pb.ChannelSource{
+			ChannelId: channel,
+			User: &pb.User{
+				Id:          sender,
+				DisplayName: sender,
+			},
+		}
+
+		if ctcp, ok := parseCtcp(msg); ok {
+			// Ignore everything but ACTION CTCP events
+			if ctcp.Action != "ACTION" {
+				return
+			}
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Action{Action: &pb.ActionEvent{
+				Source: source,
+				Text:   ctcp.Text,
+			}}})
+		} else if strings.HasPrefix(lastArg, b.cmdPrefix) {
+			msgParts := strings.SplitN(lastArg, " ", 2)
+			if len(msgParts) < 2 {
+				msgParts = append(msgParts, "")
+			}
+
+			command := strings.TrimPrefix(msgParts[0], b.cmdPrefix)
+			arg := msgParts[1]
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Command{Command: &pb.CommandEvent{
+				Source:  source,
+				Command: command,
+				Arg:     arg,
+			}}})
+		} else if len(lastArg) >= len(currentNick)+1 &&
+			strings.HasPrefix(lastArg, currentNick) &&
+			unicode.IsPunct(rune(lastArg[len(currentNick)])) &&
+			lastArg[len(currentNick)+1] == ' ' {
+
+			message := strings.TrimSpace(lastArg[len(currentNick)+1:])
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Mention{Mention: &pb.MentionEvent{
+				Source: source,
+				Text:   message,
+			}}})
+		} else {
+			message := lastArg
+
+			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Message{Message: &pb.MessageEvent{
+				Source: source,
+				Text:   message,
+			}}})
+		}
+	}
+}
+
 func (b *Backend) writeEvent(e *pb.ChatEvent) {
 	b.ingestSendLock.Lock()
 	defer b.ingestSendLock.Unlock()
@@ -245,6 +274,22 @@ func (b *Backend) handleIngest(ctx context.Context) error {
 		}
 
 		switch v := msg.Inner.(type) {
+		case *pb.ChatRequest_PerformAction:
+			err = b.writeIRCMessage(&irc.Message{
+				Command: "PRIVMSG",
+				Params: []string{
+					v.PerformAction.ChannelId,
+					fmt.Sprintf("\x01ACTION %s\x01", v.PerformAction.Text),
+				},
+			}, msg)
+		case *pb.ChatRequest_PerformPrivateAction:
+			err = b.writeIRCMessage(&irc.Message{
+				Command: "PRIVMSG",
+				Params: []string{
+					v.PerformPrivateAction.UserId,
+					fmt.Sprintf("\x01ACTION %s\x01", v.PerformPrivateAction.Text),
+				},
+			}, msg)
 		case *pb.ChatRequest_SendMessage:
 			err = b.writeIRCMessage(&irc.Message{
 				Command: "PRIVMSG",
