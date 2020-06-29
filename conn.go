@@ -142,7 +142,9 @@ func (b *Backend) handlePong(id string) {
 
 	switch v := req.Inner.(type) {
 	case *pb.ChatRequest_SendMessage,
-		*pb.ChatRequest_SendPrivateMessage:
+		*pb.ChatRequest_SendPrivateMessage,
+		*pb.ChatRequest_PerformAction,
+		*pb.ChatRequest_PerformPrivateAction:
 		// TODO: we cheat and say all message sends succeeded. This is not
 		// always true.
 		b.writeSuccess(id)
@@ -165,6 +167,8 @@ func (b *Backend) handlePong(id string) {
 		} else {
 			b.writeFailure(id)
 		}
+	default:
+		b.logger.Warn().Msgf("unknown request type in pong handler: %T", req)
 	}
 }
 
@@ -275,31 +279,51 @@ func (b *Backend) handleIngest(ctx context.Context) error {
 
 		switch v := msg.Inner.(type) {
 		case *pb.ChatRequest_PerformAction:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "PRIVMSG",
-				Params: []string{
-					v.PerformAction.ChannelId,
-					fmt.Sprintf("\x01ACTION %s\x01", v.PerformAction.Text),
-				},
-			}, msg)
+			for _, line := range splitLines(v.PerformAction.Text) {
+				innerErr := b.writeIRCMessage(&irc.Message{
+					Command: "PRIVMSG",
+					Params: []string{
+						v.PerformAction.ChannelId,
+						fmt.Sprintf("\x01ACTION %s\x01", line),
+					},
+				}, msg)
+				if err == nil {
+					err = innerErr
+				}
+			}
 		case *pb.ChatRequest_PerformPrivateAction:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "PRIVMSG",
-				Params: []string{
-					v.PerformPrivateAction.UserId,
-					fmt.Sprintf("\x01ACTION %s\x01", v.PerformPrivateAction.Text),
-				},
-			}, msg)
+			for _, line := range splitLines(v.PerformPrivateAction.Text) {
+				innerErr := b.writeIRCMessage(&irc.Message{
+					Command: "PRIVMSG",
+					Params: []string{
+						v.PerformPrivateAction.UserId,
+						fmt.Sprintf("\x01ACTION %s\x01", line),
+					},
+				}, msg)
+				if err == nil {
+					err = innerErr
+				}
+			}
 		case *pb.ChatRequest_SendMessage:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "PRIVMSG",
-				Params:  []string{v.SendMessage.ChannelId, v.SendMessage.Text},
-			}, msg)
+			for _, line := range splitLines(v.SendMessage.Text) {
+				innerErr := b.writeIRCMessage(&irc.Message{
+					Command: "PRIVMSG",
+					Params:  []string{v.SendMessage.ChannelId, line},
+				}, msg)
+				if err == nil {
+					err = innerErr
+				}
+			}
 		case *pb.ChatRequest_SendPrivateMessage:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "PRIVMSG",
-				Params:  []string{v.SendPrivateMessage.UserId, v.SendPrivateMessage.Text},
-			}, msg)
+			for _, line := range splitLines(v.SendPrivateMessage.Text) {
+				innerErr := b.writeIRCMessage(&irc.Message{
+					Command: "PRIVMSG",
+					Params:  []string{v.SendPrivateMessage.UserId, line},
+				}, msg)
+				if err == nil {
+					err = innerErr
+				}
+			}
 		case *pb.ChatRequest_JoinChannel:
 			err = b.writeIRCMessage(&irc.Message{
 				Command: "JOIN",
