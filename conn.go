@@ -27,14 +27,16 @@ type IRCConfig struct {
 
 	Logger zerolog.Logger
 
-	SeabirdHost string
-	Token       string
+	SeabirdHost  string
+	SeabirdToken string
 }
 
 type Backend struct {
 	id             string
 	channels       []string
 	cmdPrefix      string
+	seabirdHost    string
+	seabirdToken   string
 	logger         zerolog.Logger
 	ircSendLock    sync.Mutex
 	irc            *ircx.Client
@@ -49,16 +51,13 @@ func New(config IRCConfig) (*Backend, error) {
 	var err error
 
 	b := &Backend{
-		id:        config.IRCID,
-		channels:  config.Channels,
-		logger:    config.Logger,
-		cmdPrefix: config.CommandPrefix,
-		requests:  make(map[string]*pb.ChatRequest),
-	}
-
-	b.grpc, err = newGRPCClient(config.SeabirdHost, config.Token)
-	if err != nil {
-		return nil, err
+		id:           config.IRCID,
+		channels:     config.Channels,
+		logger:       config.Logger,
+		cmdPrefix:    config.CommandPrefix,
+		seabirdHost:  config.SeabirdHost,
+		seabirdToken: config.SeabirdToken,
+		requests:     make(map[string]*pb.ChatRequest),
 	}
 
 	b.irc, err = newIRCClient(&config, ircx.HandlerFunc(b.ircHandler))
@@ -349,33 +348,84 @@ func (b *Backend) handleIngest(ctx context.Context) error {
 	}
 }
 
-func (b *Backend) Run() error {
+func (b *Backend) runGrpc(ctx context.Context) error {
 	var err error
-	errGroup, ctx := errgroup.WithContext(context.Background())
 
-	// TODO: this is an ugly place for this. It also means that calling Run
-	// multiple times will break and cause race conditions. This shouldn't
-	// happen in practice, but it's good to remember.
-	b.ingestStream, err = b.grpc.IngestEvents(ctx)
-	if err != nil {
-		return err
-	}
+	for {
+		// TODO: this is an ugly place for this. It also means that calling Run
+		// multiple times will break and cause race conditions. This shouldn't
+		// happen in practice, but it's good to remember.
+		b.ingestSendLock.Lock()
+		b.grpc, err = newGRPCClient(b.seabirdHost, b.seabirdToken)
+		if err != nil {
+			b.ingestSendLock.Unlock()
+			b.logger.Warn().Err(err).Msg("got error while connecting to gRPC")
+			continue
+		}
 
-	err = b.ingestStream.Send(&pb.ChatEvent{
-		Inner: &pb.ChatEvent_Hello{
-			Hello: &pb.HelloChatEvent{
-				BackendInfo: &pb.Backend{
-					Type: "irc",
-					Id:   b.id,
+		b.ingestStream, err = b.grpc.IngestEvents(ctx)
+		if err != nil {
+			b.ingestSendLock.Unlock()
+			b.logger.Warn().Err(err).Msg("got error while calling ingest events")
+			continue
+		}
+		b.ingestSendLock.Unlock()
+
+		// Send the first hello event
+		err = b.ingestStream.Send(&pb.ChatEvent{
+			Inner: &pb.ChatEvent_Hello{
+				Hello: &pb.HelloChatEvent{
+					BackendInfo: &pb.Backend{
+						Type: "irc",
+						Id:   b.id,
+					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		return err
-	}
+		})
+		if err != nil {
+			b.logger.Warn().Err(err).Msg("got error while sending hello event")
+			continue
+		}
 
-	errGroup.Go(func() error { return b.handleIngest(ctx) })
+		// Send any events we need in order to update the state of core. Note
+		// that we separately acquire the RLock so no changes can come in
+		// between the ListChannels and GetChannel calls.
+		b.irc.Tracker.RLock()
+		channels := b.irc.Tracker.ListChannels()
+		for _, channelName := range channels {
+			if channel := b.irc.Tracker.GetChannel(channelName); channel != nil {
+				err = b.ingestStream.Send(&pb.ChatEvent{
+					Inner: &pb.ChatEvent_JoinChannel{
+						JoinChannel: &pb.JoinChannelChatEvent{
+							ChannelId:   channel.Name,
+							DisplayName: channel.Name,
+							Topic:       channel.Topic,
+						},
+					},
+				})
+				if err != nil {
+					break
+				}
+			}
+		}
+		b.irc.Tracker.RUnlock()
+		if err != nil {
+			b.logger.Warn().Err(err).Msg("got error while sending initial state")
+			continue
+		}
+
+		err = b.handleIngest(ctx)
+		if err != nil {
+			b.logger.Warn().Err(err).Msg("got error while handling chat ingest")
+			continue
+		}
+	}
+}
+
+func (b *Backend) Run() error {
+	errGroup, ctx := errgroup.WithContext(context.Background())
+
+	errGroup.Go(func() error { return b.runGrpc(ctx) })
 	errGroup.Go(func() error { return b.irc.RunContext(ctx) })
 
 	return errGroup.Wait()

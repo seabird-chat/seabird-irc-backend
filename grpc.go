@@ -8,9 +8,10 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/seabird-chat/seabird-irc-backend/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"github.com/seabird-chat/seabird-irc-backend/pb"
 )
 
 func newGRPCClient(host, token string) (pb.ChatIngestClient, error) {

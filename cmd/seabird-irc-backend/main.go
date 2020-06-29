@@ -58,7 +58,7 @@ func main() {
 		Pass:          EnvDefault("IRC_PASS", ""),
 		Channels:      strings.Split(EnvDefault("IRC_CHANNELS", ""), ","),
 		SeabirdHost:   Env(logger, "SEABIRD_HOST"),
-		Token:         Env(logger, "SEABIRD_TOKEN"),
+		SeabirdToken:  Env(logger, "SEABIRD_TOKEN"),
 	}
 
 	backend, err := seabird_irc.New(config)
