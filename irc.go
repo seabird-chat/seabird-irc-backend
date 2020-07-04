@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-irc/irc/v4"
 	"github.com/go-irc/ircx"
-	"github.com/seabird-chat/seabird-irc-backend/pb"
+	"github.com/seabird-chat/seabird-go/pb"
 )
 
 type CTCPMessage struct {

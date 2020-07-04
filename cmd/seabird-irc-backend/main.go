@@ -41,7 +41,7 @@ func main() {
 	}
 
 	logger = logger.With().Timestamp().Logger()
-	logger.Level(zerolog.InfoLevel)
+	logger.Level(zerolog.DebugLevel)
 
 	nick := Env(logger, "IRC_NICK")
 	user := EnvDefault("IRC_USER", nick)

@@ -2,9 +2,11 @@ package seabird_irc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/go-irc/irc/v4"
@@ -12,7 +14,8 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/seabird-chat/seabird-irc-backend/pb"
+	"github.com/seabird-chat/seabird-go"
+	"github.com/seabird-chat/seabird-go/pb"
 )
 
 type IRCConfig struct {
@@ -32,31 +35,31 @@ type IRCConfig struct {
 }
 
 type Backend struct {
-	id             string
-	channels       []string
-	cmdPrefix      string
-	seabirdHost    string
-	seabirdToken   string
-	logger         zerolog.Logger
-	ircSendLock    sync.Mutex
-	irc            *ircx.Client
-	grpc           pb.ChatIngestClient
-	ingestSendLock sync.Mutex
-	ingestStream   pb.ChatIngest_IngestEventsClient
-	requestsLock   sync.Mutex
-	requests       map[string]*pb.ChatRequest
+	id           string
+	channels     []string
+	cmdPrefix    string
+	logger       zerolog.Logger
+	ircSendLock  sync.Mutex
+	irc          *ircx.Client
+	inner        *seabird.ChatIngestClient
+	outputStream chan *pb.ChatEvent
+	requestsLock sync.Mutex
+	requests     map[string]*pb.ChatRequest
 }
 
 func New(config IRCConfig) (*Backend, error) {
-	var err error
+	client, err := seabird.NewChatIngestClient(config.SeabirdHost, config.SeabirdToken)
+	if err != nil {
+		return nil, err
+	}
 
 	b := &Backend{
 		id:           config.IRCID,
 		channels:     config.Channels,
 		logger:       config.Logger,
 		cmdPrefix:    config.CommandPrefix,
-		seabirdHost:  config.SeabirdHost,
-		seabirdToken: config.SeabirdToken,
+		inner:        client,
+		outputStream: make(chan *pb.ChatEvent, 10),
 		requests:     make(map[string]*pb.ChatRequest),
 	}
 
@@ -260,165 +263,171 @@ func (b *Backend) handlePrivmsg(msg *irc.Message) {
 }
 
 func (b *Backend) writeEvent(e *pb.ChatEvent) {
-	b.ingestSendLock.Lock()
-	defer b.ingestSendLock.Unlock()
-
-	err := b.ingestStream.Send(e)
-	if err != nil {
-		b.logger.Warn().Err(err).Msg("failed to send event")
+	// Note that we need to allow events to be dropped so we don't lose the
+	// connection when the gRPC service is down.
+	select {
+	case b.outputStream <- e:
+	default:
 	}
 }
 
-func (b *Backend) handleIngest(ctx context.Context) error {
+func (b *Backend) handleIngest(ctx context.Context) {
+	ingestStream, err := b.inner.IngestEvents()
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("got error while calling ingest events")
+		return
+	}
+
+	// Send the first hello event
+	err = ingestStream.Send(&pb.ChatEvent{
+		Inner: &pb.ChatEvent_Hello{
+			Hello: &pb.HelloChatEvent{
+				BackendInfo: &pb.Backend{
+					Type: "irc",
+					Id:   b.id,
+				},
+			},
+		},
+	})
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("got error while sending hello event")
+		return
+	}
+
+	// Send any events we need in order to update the state of core. Note
+	// that we separately acquire the RLock so no changes can come in
+	// between the ListChannels and GetChannel calls.
+	b.irc.Tracker.RLock()
+	channels := b.irc.Tracker.ListChannels()
+	for _, channelName := range channels {
+		if channel := b.irc.Tracker.GetChannel(channelName); channel != nil {
+			err = ingestStream.Send(&pb.ChatEvent{
+				Inner: &pb.ChatEvent_JoinChannel{
+					JoinChannel: &pb.JoinChannelChatEvent{
+						ChannelId:   channel.Name,
+						DisplayName: channel.Name,
+						Topic:       channel.Topic,
+					},
+				},
+			})
+			if err != nil {
+				break
+			}
+		}
+	}
+	b.irc.Tracker.RUnlock()
+
+	if err != nil {
+		b.logger.Warn().Err(err).Msg("got error while sending initial state")
+		return
+	}
+
+	// Loop through all events and handle them
 	for {
-		msg, err := b.ingestStream.Recv()
-		if err != nil {
-			return err
-		}
+		select {
+		case event := <-b.outputStream:
+			b.logger.Debug().Msgf("Sending event: %+v", event)
 
-		switch v := msg.Inner.(type) {
-		case *pb.ChatRequest_PerformAction:
-			for _, line := range splitLines(v.PerformAction.Text) {
-				innerErr := b.writeIRCMessage(&irc.Message{
-					Command: "PRIVMSG",
-					Params: []string{
-						v.PerformAction.ChannelId,
-						fmt.Sprintf("\x01ACTION %s\x01", line),
-					},
-				}, msg)
-				if err == nil {
-					err = innerErr
-				}
+			err := ingestStream.Send(event)
+			if err != nil {
+				b.logger.Warn().Err(err).Msgf("got error while sending event: %+v", event)
+				return
 			}
-		case *pb.ChatRequest_PerformPrivateAction:
-			for _, line := range splitLines(v.PerformPrivateAction.Text) {
-				innerErr := b.writeIRCMessage(&irc.Message{
-					Command: "PRIVMSG",
-					Params: []string{
-						v.PerformPrivateAction.UserId,
-						fmt.Sprintf("\x01ACTION %s\x01", line),
-					},
-				}, msg)
-				if err == nil {
-					err = innerErr
-				}
-			}
-		case *pb.ChatRequest_SendMessage:
-			for _, line := range splitLines(v.SendMessage.Text) {
-				innerErr := b.writeIRCMessage(&irc.Message{
-					Command: "PRIVMSG",
-					Params:  []string{v.SendMessage.ChannelId, line},
-				}, msg)
-				if err == nil {
-					err = innerErr
-				}
-			}
-		case *pb.ChatRequest_SendPrivateMessage:
-			for _, line := range splitLines(v.SendPrivateMessage.Text) {
-				innerErr := b.writeIRCMessage(&irc.Message{
-					Command: "PRIVMSG",
-					Params:  []string{v.SendPrivateMessage.UserId, line},
-				}, msg)
-				if err == nil {
-					err = innerErr
-				}
-			}
-		case *pb.ChatRequest_JoinChannel:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "JOIN",
-				Params:  []string{v.JoinChannel.ChannelName},
-			}, msg)
-		case *pb.ChatRequest_LeaveChannel:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "PART",
-				Params:  []string{v.LeaveChannel.ChannelId},
-			}, msg)
-		case *pb.ChatRequest_UpdateChannelInfo:
-			err = b.writeIRCMessage(&irc.Message{
-				Command: "TOPIC",
-				Params:  []string{v.UpdateChannelInfo.ChannelId, v.UpdateChannelInfo.Topic},
-			}, msg)
-		default:
-			b.logger.Warn().Msgf("unknown msg type: %T", msg.Inner)
-		}
 
-		if err != nil {
-			return err
+		case msg, ok := <-ingestStream.C:
+			if !ok {
+				b.logger.Warn().Err(errors.New("ingest stream ended")).Msg("unexpected end of ingest stream")
+				return
+			}
+
+			switch v := msg.Inner.(type) {
+			case *pb.ChatRequest_PerformAction:
+				for _, line := range splitLines(v.PerformAction.Text) {
+					innerErr := b.writeIRCMessage(&irc.Message{
+						Command: "PRIVMSG",
+						Params: []string{
+							v.PerformAction.ChannelId,
+							fmt.Sprintf("\x01ACTION %s\x01", line),
+						},
+					}, msg)
+					if err == nil {
+						err = innerErr
+					}
+				}
+			case *pb.ChatRequest_PerformPrivateAction:
+				for _, line := range splitLines(v.PerformPrivateAction.Text) {
+					innerErr := b.writeIRCMessage(&irc.Message{
+						Command: "PRIVMSG",
+						Params: []string{
+							v.PerformPrivateAction.UserId,
+							fmt.Sprintf("\x01ACTION %s\x01", line),
+						},
+					}, msg)
+					if err == nil {
+						err = innerErr
+					}
+				}
+			case *pb.ChatRequest_SendMessage:
+				for _, line := range splitLines(v.SendMessage.Text) {
+					innerErr := b.writeIRCMessage(&irc.Message{
+						Command: "PRIVMSG",
+						Params:  []string{v.SendMessage.ChannelId, line},
+					}, msg)
+					if err == nil {
+						err = innerErr
+					}
+				}
+			case *pb.ChatRequest_SendPrivateMessage:
+				for _, line := range splitLines(v.SendPrivateMessage.Text) {
+					innerErr := b.writeIRCMessage(&irc.Message{
+						Command: "PRIVMSG",
+						Params:  []string{v.SendPrivateMessage.UserId, line},
+					}, msg)
+					if err == nil {
+						err = innerErr
+					}
+				}
+			case *pb.ChatRequest_JoinChannel:
+				err = b.writeIRCMessage(&irc.Message{
+					Command: "JOIN",
+					Params:  []string{v.JoinChannel.ChannelName},
+				}, msg)
+			case *pb.ChatRequest_LeaveChannel:
+				err = b.writeIRCMessage(&irc.Message{
+					Command: "PART",
+					Params:  []string{v.LeaveChannel.ChannelId},
+				}, msg)
+			case *pb.ChatRequest_UpdateChannelInfo:
+				err = b.writeIRCMessage(&irc.Message{
+					Command: "TOPIC",
+					Params:  []string{v.UpdateChannelInfo.ChannelId, v.UpdateChannelInfo.Topic},
+				}, msg)
+			default:
+				b.logger.Warn().Msgf("unknown msg type: %T", msg.Inner)
+			}
+
+			if err != nil {
+				b.logger.Warn().Err(err).Msg("failed to write irc message")
+				return
+			}
+
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
 func (b *Backend) runGrpc(ctx context.Context) error {
-	var err error
-
 	for {
-		// TODO: this is an ugly place for this. It also means that calling Run
-		// multiple times will break and cause race conditions. This shouldn't
-		// happen in practice, but it's good to remember.
-		b.ingestSendLock.Lock()
-		b.grpc, err = newGRPCClient(b.seabirdHost, b.seabirdToken)
+		b.handleIngest(ctx)
+
+		// If the context exited, we're shutting down
+		err := ctx.Err()
 		if err != nil {
-			b.ingestSendLock.Unlock()
-			b.logger.Warn().Err(err).Msg("got error while connecting to gRPC")
-			continue
+			return err
 		}
 
-		b.ingestStream, err = b.grpc.IngestEvents(ctx)
-		if err != nil {
-			b.ingestSendLock.Unlock()
-			b.logger.Warn().Err(err).Msg("got error while calling ingest events")
-			continue
-		}
-		b.ingestSendLock.Unlock()
-
-		// Send the first hello event
-		err = b.ingestStream.Send(&pb.ChatEvent{
-			Inner: &pb.ChatEvent_Hello{
-				Hello: &pb.HelloChatEvent{
-					BackendInfo: &pb.Backend{
-						Type: "irc",
-						Id:   b.id,
-					},
-				},
-			},
-		})
-		if err != nil {
-			b.logger.Warn().Err(err).Msg("got error while sending hello event")
-			continue
-		}
-
-		// Send any events we need in order to update the state of core. Note
-		// that we separately acquire the RLock so no changes can come in
-		// between the ListChannels and GetChannel calls.
-		b.irc.Tracker.RLock()
-		channels := b.irc.Tracker.ListChannels()
-		for _, channelName := range channels {
-			if channel := b.irc.Tracker.GetChannel(channelName); channel != nil {
-				err = b.ingestStream.Send(&pb.ChatEvent{
-					Inner: &pb.ChatEvent_JoinChannel{
-						JoinChannel: &pb.JoinChannelChatEvent{
-							ChannelId:   channel.Name,
-							DisplayName: channel.Name,
-							Topic:       channel.Topic,
-						},
-					},
-				})
-				if err != nil {
-					break
-				}
-			}
-		}
-		b.irc.Tracker.RUnlock()
-		if err != nil {
-			b.logger.Warn().Err(err).Msg("got error while sending initial state")
-			continue
-		}
-
-		err = b.handleIngest(ctx)
-		if err != nil {
-			b.logger.Warn().Err(err).Msg("got error while handling chat ingest")
-			continue
-		}
+		time.Sleep(5 * time.Second)
 	}
 }
 
