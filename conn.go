@@ -272,25 +272,9 @@ func (b *Backend) writeEvent(e *pb.ChatEvent) {
 }
 
 func (b *Backend) handleIngest(ctx context.Context) {
-	ingestStream, err := b.inner.IngestEvents()
+	ingestStream, err := b.inner.IngestEvents("irc", b.id)
 	if err != nil {
 		b.logger.Warn().Err(err).Msg("got error while calling ingest events")
-		return
-	}
-
-	// Send the first hello event
-	err = ingestStream.Send(&pb.ChatEvent{
-		Inner: &pb.ChatEvent_Hello{
-			Hello: &pb.HelloChatEvent{
-				BackendInfo: &pb.Backend{
-					Type: "irc",
-					Id:   b.id,
-				},
-			},
-		},
-	})
-	if err != nil {
-		b.logger.Warn().Err(err).Msg("got error while sending hello event")
 		return
 	}
 
