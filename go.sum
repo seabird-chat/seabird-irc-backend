@@ -45,8 +45,8 @@ github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:
 github.com/rs/xid v1.2.1/go.mod h1:+uKXf+4Djp6Md1KODXJxgGQPKngRmWyn10oCKFzNHOQ=
 github.com/rs/zerolog v1.19.0 h1:hYz4ZVdUgjXTBUmrkrw55j1nHx68LfOKIQk5IYtyScg=
 github.com/rs/zerolog v1.19.0/go.mod h1:IzD0RJ65iWH0w97OQQebJEvTZYvsCUm9WVLWBQrJRjo=
-github.com/seabird-chat/seabird-go v0.2.0 h1:hhn4rCIiZhuY25GSkGmLl3B8fJK5Wu7ARRPQOj7NlIA=
-github.com/seabird-chat/seabird-go v0.2.0/go.mod h1:rHghMBCsAEvCINx4PMT7KYb852AFDM88HW+Fm8Xh57U=
+github.com/seabird-chat/seabird-go v0.2.5 h1:fBNwBC8iWnls1P0Cv4vWLeoyk8ThdNib9JbOLdKgFx0=
+github.com/seabird-chat/seabird-go v0.2.5/go.mod h1:rHghMBCsAEvCINx4PMT7KYb852AFDM88HW+Fm8Xh57U=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.4.0/go.mod h1:j7eGeouHqKxXV5pUuKE4zz7dFj8WfuZ+81PSLYec5m4=
 github.com/stretchr/testify v1.6.0 h1:jlIyCplCJFULU/01vCkhKuTyc3OorI3bJFuw6obfgho=
