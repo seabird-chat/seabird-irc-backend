@@ -386,6 +386,17 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					Command: "TOPIC",
 					Params:  []string{v.UpdateChannelInfo.ChannelId, v.UpdateChannelInfo.Topic},
 				}, msg)
+			case *pb.ChatRequest_GetConfig:
+				config := make(map[string]string)
+				config["command_prefix"] = b.cmdPrefix
+
+				b.writeEvent(&pb.ChatEvent{
+					Id: msg.Id,
+					Inner: &pb.ChatEvent_Config{
+						Config: &pb.ConfigChatEvent{
+							Config: config,
+						}},
+				})
 			default:
 				b.logger.Warn().Msgf("unknown msg type: %T", msg.Inner)
 			}

@@ -2,6 +2,8 @@ module github.com/seabird-chat/seabird-irc-backend
 
 go 1.13
 
+replace github.com/seabird-chat/seabird-go => /home/jsvana/projects/seabird-go
+
 require (
 	github.com/go-irc/irc/v4 v4.0.0-alpha.4
 	github.com/go-irc/ircx v0.0.0-20200604205734-b8679b8d359f
@@ -11,6 +13,6 @@ require (
 	github.com/rs/zerolog v1.19.0
 	github.com/seabird-chat/seabird-go v0.2.5
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
-	google.golang.org/grpc v1.30.0
-	google.golang.org/protobuf v1.24.0
+	google.golang.org/grpc v1.34.0
+	google.golang.org/protobuf v1.25.0
 )
