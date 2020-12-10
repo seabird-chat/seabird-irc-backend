@@ -2,8 +2,6 @@ module github.com/seabird-chat/seabird-irc-backend
 
 go 1.13
 
-replace github.com/seabird-chat/seabird-go => /home/jsvana/projects/seabird-go
-
 require (
 	github.com/go-irc/irc/v4 v4.0.0-alpha.4
 	github.com/go-irc/ircx v0.0.0-20200604205734-b8679b8d359f
