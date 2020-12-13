@@ -386,14 +386,14 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					Command: "TOPIC",
 					Params:  []string{v.UpdateChannelInfo.ChannelId, v.UpdateChannelInfo.Topic},
 				}, msg)
-			case *pb.ChatRequest_GetConfig:
+			case *pb.ChatRequest_Metadata:
 				config := make(map[string]string)
 				config["command_prefix"] = b.cmdPrefix
 
 				b.writeEvent(&pb.ChatEvent{
 					Id: msg.Id,
-					Inner: &pb.ChatEvent_Config{
-						Config: &pb.ConfigChatEvent{
+					Inner: &pb.ChatEvent_Metadata{
+						Metadata: &pb.MetadataChatEvent{
 							Config: config,
 						}},
 				})
