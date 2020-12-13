@@ -394,7 +394,7 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					Id: msg.Id,
 					Inner: &pb.ChatEvent_Metadata{
 						Metadata: &pb.MetadataChatEvent{
-							Config: config,
+							Values: config,
 						}},
 				})
 			default:
