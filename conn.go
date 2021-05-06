@@ -25,6 +25,7 @@ type IRCConfig struct {
 	User          string
 	Name          string
 	Pass          string
+	NickServPass  string
 	CommandPrefix string
 	Channels      []string
 
@@ -38,6 +39,7 @@ type Backend struct {
 	id           string
 	channels     []string
 	cmdPrefix    string
+	nickservPass string
 	logger       zerolog.Logger
 	ircSendLock  sync.Mutex
 	irc          *ircx.Client
@@ -58,6 +60,7 @@ func New(config IRCConfig) (*Backend, error) {
 		channels:     config.Channels,
 		logger:       config.Logger,
 		cmdPrefix:    config.CommandPrefix,
+		nickservPass: config.NickServPass,
 		inner:        client,
 		outputStream: make(chan *pb.ChatEvent, 10),
 		requests:     make(map[string]*pb.ChatRequest),
@@ -68,12 +71,35 @@ func New(config IRCConfig) (*Backend, error) {
 		return nil, err
 	}
 
+	// This is the song-and-dance needed to add our own debug callbacks to print
+	// all messages sent via the IRC client. It should probably remain disabled
+	// for most of the time.
+	/*
+		b.irc.Conn.Writer.DebugCallback = func(line string) {
+			b.logger.Debug().Msgf("--> %s", strings.TrimRight(line, "\r\n"))
+		}
+
+		b.irc.Conn.Reader.DebugCallback = func(line string) {
+			b.logger.Debug().Msgf("<-- %s", strings.TrimRight(line, "\r\n"))
+		}
+	*/
+
 	return b, nil
 }
 
 func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
 	switch msg.Command {
 	case "001":
+		if b.nickservPass != "" {
+			_ = b.writeIRCMessage(&irc.Message{
+				Command: "PRIVMSG",
+				Params: []string{
+					"NickServ",
+					b.nickservPass,
+				},
+			}, nil)
+		}
+
 		for _, channel := range b.channels {
 			_ = b.writeIRCMessage(&irc.Message{
 				Command: "JOIN",
@@ -317,7 +343,6 @@ func (b *Backend) handleIngest(ctx context.Context) {
 				b.logger.Warn().Err(err).Msgf("got error while sending event: %+v", event)
 				return
 			}
-
 		case msg, ok := <-ingestStream.C:
 			if !ok {
 				b.logger.Warn().Err(errors.New("ingest stream ended")).Msg("unexpected end of ingest stream")

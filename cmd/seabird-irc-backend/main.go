@@ -56,6 +56,7 @@ func main() {
 		User:          user,
 		Name:          name,
 		Pass:          EnvDefault("IRC_PASS", ""),
+		NickServPass:  EnvDefault("IRC_NICKSERV_PASS", ""),
 		Channels:      strings.Split(EnvDefault("IRC_CHANNELS", ""), ","),
 		SeabirdHost:   Env(logger, "SEABIRD_HOST"),
 		SeabirdToken:  Env(logger, "SEABIRD_TOKEN"),
