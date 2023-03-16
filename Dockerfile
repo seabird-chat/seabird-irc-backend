@@ -19,4 +19,4 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 COPY entrypoint.sh /usr/local/bin/seabird-entrypoint.sh
 COPY --from=builder /build /bin
 
-ENTRYPOINT ["/usr/bin/seabird-entrypoint.sh"]
+CMD ["/usr/local/bin/seabird-entrypoint.sh"]
