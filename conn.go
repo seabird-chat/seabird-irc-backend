@@ -99,7 +99,7 @@ func (b *Backend) ircHandler(c *irc.Client, msg *irc.Message) {
 				Command: "PRIVMSG",
 				Params: []string{
 					"NickServ",
-					"IDENTIFY " + b.nickservPass,
+					"IDENTIFY " + b.targetNick + " " + b.nickservPass,
 				},
 			}, nil)
 		}
