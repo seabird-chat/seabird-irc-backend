@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-irc/irc/v4"
-	"github.com/go-irc/ircx"
+	"gopkg.in/irc.v4"
+
 	"github.com/seabird-chat/seabird-go/pb"
 )
 
@@ -38,7 +38,7 @@ func parseCtcp(msg *irc.Message) (*CTCPMessage, bool) {
 	return ret, true
 }
 
-func newIRCClient(config *IRCConfig, handler ircx.Handler) (*ircx.Client, error) {
+func newIRCClient(config *IRCConfig, handler irc.Handler) (*irc.Client, error) {
 	ircUrl, err := url.Parse(config.IRCHost)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func newIRCClient(config *IRCConfig, handler ircx.Handler) (*ircx.Client, error)
 		return nil, err
 	}
 
-	return ircx.NewClient(c, ircx.ClientConfig{
+	return irc.NewClient(c, irc.ClientConfig{
 		Nick:          config.Nick,
 		User:          config.User,
 		Name:          config.Name,
