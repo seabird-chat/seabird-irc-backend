@@ -9,25 +9,26 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/go-irc/irc/v4"
-	"github.com/go-irc/ircx"
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/irc.v4"
 
 	"github.com/seabird-chat/seabird-go"
 	"github.com/seabird-chat/seabird-go/pb"
 )
 
 type IRCConfig struct {
-	IRCHost       string
-	IRCID         string
-	Nick          string
-	User          string
-	Name          string
-	Pass          string
-	NickServPass  string
-	CommandPrefix string
-	Channels      []string
+	IRCHost           string
+	IRCID             string
+	Nick              string
+	User              string
+	Name              string
+	Pass              string
+	Debug             bool
+	NickServPass      string
+	CommandPrefix     string
+	Channels          []string
+	NickCheckDuration time.Duration
 
 	Logger zerolog.Logger
 
@@ -36,17 +37,20 @@ type IRCConfig struct {
 }
 
 type Backend struct {
-	id           string
-	channels     []string
-	cmdPrefix    string
-	nickservPass string
-	logger       zerolog.Logger
-	ircSendLock  sync.Mutex
-	irc          *ircx.Client
-	inner        *seabird.ChatIngestClient
-	outputStream chan *pb.ChatEvent
-	requestsLock sync.Mutex
-	requests     map[string]*pb.ChatRequest
+	id                string
+	channels          []string
+	cmdPrefix         string
+	nickservPass      string
+	targetNick        string
+	lastNickCheck     time.Time
+	nickCheckDuration time.Duration
+	logger            zerolog.Logger
+	ircSendLock       sync.Mutex
+	irc               *irc.Client
+	inner             *seabird.ChatIngestClient
+	outputStream      chan *pb.ChatEvent
+	requestsLock      sync.Mutex
+	requests          map[string]*pb.ChatRequest
 }
 
 func New(config IRCConfig) (*Backend, error) {
@@ -56,25 +60,25 @@ func New(config IRCConfig) (*Backend, error) {
 	}
 
 	b := &Backend{
-		id:           config.IRCID,
-		channels:     config.Channels,
-		logger:       config.Logger,
-		cmdPrefix:    config.CommandPrefix,
-		nickservPass: config.NickServPass,
-		inner:        client,
-		outputStream: make(chan *pb.ChatEvent, 10),
-		requests:     make(map[string]*pb.ChatRequest),
+		id:                config.IRCID,
+		channels:          config.Channels,
+		logger:            config.Logger,
+		cmdPrefix:         config.CommandPrefix,
+		nickservPass:      config.NickServPass,
+		targetNick:        config.Nick,
+		lastNickCheck:     time.Now(),
+		nickCheckDuration: config.NickCheckDuration,
+		inner:             client,
+		outputStream:      make(chan *pb.ChatEvent, 10),
+		requests:          make(map[string]*pb.ChatRequest),
 	}
 
-	b.irc, err = newIRCClient(&config, ircx.HandlerFunc(b.ircHandler))
+	b.irc, err = newIRCClient(&config, irc.HandlerFunc(b.ircHandler))
 	if err != nil {
 		return nil, err
 	}
 
-	// This is the song-and-dance needed to add our own debug callbacks to print
-	// all messages sent via the IRC client. It should probably remain disabled
-	// for most of the time.
-	/*
+	if config.Debug {
 		b.irc.Conn.Writer.DebugCallback = func(line string) {
 			b.logger.Debug().Msgf("--> %s", strings.TrimRight(line, "\r\n"))
 		}
@@ -82,12 +86,12 @@ func New(config IRCConfig) (*Backend, error) {
 		b.irc.Conn.Reader.DebugCallback = func(line string) {
 			b.logger.Debug().Msgf("<-- %s", strings.TrimRight(line, "\r\n"))
 		}
-	*/
+	}
 
 	return b, nil
 }
 
-func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
+func (b *Backend) ircHandler(c *irc.Client, msg *irc.Message) {
 	switch msg.Command {
 	case "001":
 		if b.nickservPass != "" {
@@ -129,6 +133,10 @@ func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
 		}
 	case "PONG":
 		b.handlePong(msg.Trailing())
+	case "QUIT":
+		if msg.Prefix.User == b.targetNick {
+			b.checkCurrentNick()
+		}
 	case irc.RPL_TOPIC:
 		b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_ChangeChannel{ChangeChannel: &pb.ChangeChannelChatEvent{
 			ChannelId:   msg.Params[1],
@@ -137,6 +145,26 @@ func (b *Backend) ircHandler(c *ircx.Client, msg *irc.Message) {
 		}}})
 	default:
 	}
+
+	if time.Since(b.lastNickCheck) > b.nickCheckDuration {
+		b.checkCurrentNick()
+	}
+}
+
+func (b *Backend) checkCurrentNick() {
+	currentNick := b.irc.CurrentNick()
+	if currentNick != b.targetNick {
+		b.logger.Warn().
+			Str("target_nick", b.targetNick).
+			Str("current_nick", currentNick).
+			Msg("Current nick doesn't match target nick, trying to change NICK")
+		b.writeIRCMessage(&irc.Message{
+			Command: "NICK",
+			Params:  []string{b.targetNick},
+		}, nil)
+	}
+
+	b.lastNickCheck = time.Now()
 }
 
 func (b *Backend) popRequest(id string) *pb.ChatRequest {
