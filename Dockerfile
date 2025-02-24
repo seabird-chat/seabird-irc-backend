@@ -1,5 +1,5 @@
 # Stage 1: Build the application
-FROM golang:1.20-bullseye as builder
+FROM golang:1.24-bullseye as builder
 
 RUN mkdir /build
 
