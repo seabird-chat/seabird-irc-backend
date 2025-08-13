@@ -56,7 +56,7 @@ type Backend struct {
 func New(config IRCConfig) (*Backend, error) {
 	client, err := seabird.NewChatIngestClient(config.SeabirdHost, config.SeabirdToken)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create new chat ingest client: %w", err)
 	}
 
 	b := &Backend{
@@ -75,7 +75,7 @@ func New(config IRCConfig) (*Backend, error) {
 
 	b.irc, err = newIRCClient(&config, irc.HandlerFunc(b.ircHandler))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create new irc client: %w", err)
 	}
 
 	if config.Debug {
