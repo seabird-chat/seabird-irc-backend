@@ -1,0 +1,27 @@
+when:
+  - event: pull_request
+  - event: push
+    branch: main
+
+# Always build on arm64 so our environment matches
+labels:
+  platform: linux/arm64
+
+steps:
+  check-fmt:
+    image: nixos/nix:2.35.1
+    environment:
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        accept-flake-config = true
+    commands:
+      - nix fmt -- --ci
+
+  build:
+    image: nixos/nix:2.35.1
+    environment:
+      NIX_CONFIG: |
+        experimental-features = nix-command flakes
+        accept-flake-config = true
+    commands:
+      - nix build --print-build-logs
