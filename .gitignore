@@ -16,3 +16,4 @@
 
 *.pb.go
 .env
+/result
