@@ -42,7 +42,7 @@
 
           packages.default = pkgs.buildGoModule rec {
             pname = "seabird-irc-backend";
-            version = "0.2.4-dev";
+            version = "0.2.4";
 
             src = ./.;
 
