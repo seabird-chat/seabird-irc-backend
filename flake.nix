@@ -21,7 +21,7 @@
           formatter = pkgs.treefmt.withConfig {
             runtimeInputs = [
               pkgs.nixfmt
-              pkgs.go
+              pkgs.gotools
             ];
 
             settings = {
@@ -32,8 +32,8 @@
                 includes = [ "*.nix" ];
               };
 
-              formatter.gofmt = {
-                command = "gofmt";
+              formatter.goimports = {
+                command = "goimports";
                 options = [ "-w" ];
                 includes = [ "*.go" ];
               };
