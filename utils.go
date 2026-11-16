@@ -30,11 +30,11 @@ func stripControlChars(s string) string {
 }
 
 // splitPoint returns the byte offset at which to split text, which must be
-// longer than max, so the first part is at most max bytes. It prefers a space
-// in the second half of the first part, and never splits inside a UTF-8
+// longer than limit, so the first part is at most limit bytes. It prefers a
+// space in the second half of the first part, and never splits inside a UTF-8
 // sequence.
-func splitPoint(text string, max int) int {
-	cut := max
+func splitPoint(text string, limit int) int {
+	cut := limit
 	for cut > 0 && !utf8.RuneStart(text[cut]) {
 		cut--
 	}
