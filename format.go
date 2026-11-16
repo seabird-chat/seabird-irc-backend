@@ -8,6 +8,13 @@ const (
 	codeStrike    = "\x1E"
 	codeMono      = "\x11"
 	codeReset     = "\x0F"
+	// codeColor starts a mIRC color, followed by optional foreground and
+	// background numbers.
+	codeColor = "\x03"
+	// codeHexColor starts a hex color, followed by optional RRGGBB values.
+	codeHexColor = "\x04"
+	// codeReverse swaps foreground and background colors.
+	codeReverse = "\x16"
 	// codeSpoiler is black text on a black background.
 	codeSpoiler = "\x0301,01"
 )

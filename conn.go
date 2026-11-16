@@ -228,86 +228,8 @@ func (b *Backend) handlePong(id string) {
 }
 
 func (b *Backend) handlePrivmsg(msg *irc.Message) {
-	lastArg := msg.Trailing()
-	currentNick := b.irc.CurrentNick()
-
-	if msg.Params[0] == currentNick {
-		sender := msg.Prefix.Name
-		message := lastArg
-
-		if ctcp, ok := parseCtcp(msg); ok {
-			// Ignore everything but ACTION CTCP events
-			if ctcp.Action != "ACTION" {
-				return
-			}
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateAction{PrivateAction: &pb.PrivateActionEvent{
-				Source: &pb.User{
-					Id:          sender,
-					DisplayName: sender,
-				},
-				Text: ctcp.Text,
-			}}})
-		} else {
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_PrivateMessage{PrivateMessage: &pb.PrivateMessageEvent{
-				Source: &pb.User{
-					Id:          sender,
-					DisplayName: sender,
-				},
-				Text: message,
-			}}})
-		}
-	} else {
-		channel := msg.Params[0]
-		sender := msg.Prefix.Name
-
-		source := &pb.ChannelSource{
-			ChannelId: channel,
-			User: &pb.User{
-				Id:          sender,
-				DisplayName: sender,
-			},
-		}
-
-		if ctcp, ok := parseCtcp(msg); ok {
-			// Ignore everything but ACTION CTCP events
-			if ctcp.Action != "ACTION" {
-				return
-			}
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Action{Action: &pb.ActionEvent{
-				Source: source,
-				Text:   ctcp.Text,
-			}}})
-		} else if strings.HasPrefix(lastArg, b.cmdPrefix) {
-			msgParts := strings.SplitN(lastArg, " ", 2)
-			if len(msgParts) < 2 {
-				msgParts = append(msgParts, "")
-			}
-
-			command := strings.TrimPrefix(msgParts[0], b.cmdPrefix)
-			arg := msgParts[1]
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Command{Command: &pb.CommandEvent{
-				Source:  source,
-				Command: command,
-				Arg:     arg,
-			}}})
-		} else if n, ok := mentionPrefixLen(lastArg, currentNick); ok {
-			message := strings.TrimSpace(lastArg[n:])
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Mention{Mention: &pb.MentionEvent{
-				Source: source,
-				Text:   message,
-			}}})
-		} else {
-			message := lastArg
-
-			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Message{Message: &pb.MessageEvent{
-				Source: source,
-				Text:   message,
-			}}})
-		}
+	if event := eventFromPrivmsg(msg, b.irc.CurrentNick(), b.cmdPrefix); event != nil {
+		b.writeEvent(event)
 	}
 }
 
