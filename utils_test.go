@@ -30,3 +30,30 @@ func TestSplitPoint(t *testing.T) {
 		})
 	}
 }
+
+func TestMentionPrefixLen(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want int
+		ok   bool
+	}{
+		{"colon", "bot: hi", 5, true},
+		{"comma", "bot, hi", 5, true},
+		{"nick alone", "bot:", 0, false},
+		{"empty", "", 0, false},
+		{"no space", "bot:hi", 0, false},
+		{"not punctuation", "bot hi there", 0, false},
+		{"multibyte punctuation", "bot¡ hi", 0, false},
+		{"different nick", "other: hi", 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := mentionPrefixLen(tt.text, "bot")
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("got (%d, %v), want (%d, %v)", got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}

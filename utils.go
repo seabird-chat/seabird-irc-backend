@@ -2,6 +2,7 @@ package seabird_irc
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -43,4 +44,21 @@ func splitPoint(text string, max int) int {
 	}
 
 	return cut
+}
+
+// mentionPrefixLen reports whether text opens by addressing nick, as in
+// "nick: hello", and returns the length of that address: the nick, one
+// punctuation character and the space after it.
+func mentionPrefixLen(text, nick string) (int, bool) {
+	rest, ok := strings.CutPrefix(text, nick)
+	if !ok || len(rest) < 2 {
+		return 0, false
+	}
+
+	punct, space := rest[0], rest[1]
+	if punct >= utf8.RuneSelf || !unicode.IsPunct(rune(punct)) || space != ' ' {
+		return 0, false
+	}
+
+	return len(nick) + 2, true
 }

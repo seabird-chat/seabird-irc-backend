@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/rs/zerolog"
 	"golang.org/x/sync/errgroup"
@@ -294,12 +293,8 @@ func (b *Backend) handlePrivmsg(msg *irc.Message) {
 				Command: command,
 				Arg:     arg,
 			}}})
-		} else if len(lastArg) >= len(currentNick)+1 &&
-			strings.HasPrefix(lastArg, currentNick) &&
-			unicode.IsPunct(rune(lastArg[len(currentNick)])) &&
-			lastArg[len(currentNick)+1] == ' ' {
-
-			message := strings.TrimSpace(lastArg[len(currentNick)+1:])
+		} else if n, ok := mentionPrefixLen(lastArg, currentNick); ok {
+			message := strings.TrimSpace(lastArg[n:])
 
 			b.writeEvent(&pb.ChatEvent{Inner: &pb.ChatEvent_Mention{Mention: &pb.MentionEvent{
 				Source: source,
