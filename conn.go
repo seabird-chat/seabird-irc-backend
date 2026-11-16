@@ -379,7 +379,7 @@ func (b *Backend) handleIngest(ctx context.Context) {
 
 			switch v := msg.Inner.(type) {
 			case *pb.ChatRequest_PerformAction:
-				for _, line := range splitLines(v.PerformAction.Text) {
+				for _, line := range renderLines(v.PerformAction.Text, v.PerformAction.RootBlock) {
 					innerErr := b.writeIRCMessage(&irc.Message{
 						Command: "PRIVMSG",
 						Params: []string{
@@ -392,7 +392,7 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					}
 				}
 			case *pb.ChatRequest_PerformPrivateAction:
-				for _, line := range splitLines(v.PerformPrivateAction.Text) {
+				for _, line := range renderLines(v.PerformPrivateAction.Text, v.PerformPrivateAction.RootBlock) {
 					innerErr := b.writeIRCMessage(&irc.Message{
 						Command: "PRIVMSG",
 						Params: []string{
@@ -405,7 +405,7 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					}
 				}
 			case *pb.ChatRequest_SendMessage:
-				for _, line := range splitLines(v.SendMessage.Text) {
+				for _, line := range renderLines(v.SendMessage.Text, v.SendMessage.RootBlock) {
 					innerErr := b.writeIRCMessage(&irc.Message{
 						Command: "PRIVMSG",
 						Params:  []string{v.SendMessage.ChannelId, line},
@@ -415,7 +415,7 @@ func (b *Backend) handleIngest(ctx context.Context) {
 					}
 				}
 			case *pb.ChatRequest_SendPrivateMessage:
-				for _, line := range splitLines(v.SendPrivateMessage.Text) {
+				for _, line := range renderLines(v.SendPrivateMessage.Text, v.SendPrivateMessage.RootBlock) {
 					innerErr := b.writeIRCMessage(&irc.Message{
 						Command: "PRIVMSG",
 						Params:  []string{v.SendPrivateMessage.UserId, line},
